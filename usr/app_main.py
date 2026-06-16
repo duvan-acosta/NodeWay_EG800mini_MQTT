@@ -1358,7 +1358,6 @@ def main():
         staticPath="/usr/www/",
         staticPrefix="",
     )
-    srv.LetCacheStaticContentLevel = 0
     _thread.start_new_thread(srv.Start, ())
     _thread.start_new_thread(scheduled_restart_worker, (config,))
     _thread.start_new_thread(led_worker, (config,))
