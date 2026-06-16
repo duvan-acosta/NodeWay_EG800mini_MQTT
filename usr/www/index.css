@@ -86,7 +86,7 @@ body {
 }
 
 .topnav {
-  background: var(--gdo-navy);
+  background: #fff;
   padding: 10px 24px;
   display: flex;
   align-items: center;
@@ -94,7 +94,8 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  box-shadow: 0 2px 8px rgba(0, 45, 106, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 45, 106, 0.1);
+  border-bottom: 3px solid var(--gdo-green);
 }
 
 .logo-container {
@@ -114,7 +115,7 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 16px;
-  color: #fff;
+  color: var(--gdo-navy);
   font-weight: 500;
 }
 
@@ -122,7 +123,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--gdo-green);
+  background: var(--gdo-navy);
   animation: pulse 2s infinite;
 }
 
@@ -442,6 +443,8 @@ body {
   padding: 18px;
   font-size: 13px;
   color: var(--text3);
+  border-top: 2px solid var(--gdo-green);
+  margin-top: 10px;
 }
 
 @media (max-width: 760px) {
