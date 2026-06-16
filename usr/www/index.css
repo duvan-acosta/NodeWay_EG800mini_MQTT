@@ -5,21 +5,20 @@
 }
 
 :root {
-  --bg: #0d1429;
-  --bg2: #111b36;
-  --bg3: #162249;
+  --gdo-navy: #002d6a;
   --gdo-blue: #00a1de;
   --gdo-teal: #009494;
   --gdo-green: #a8b400;
-  --gdo-navy: #002d6a;
-  --blue: #00a1de;
-  --green: #a8b400;
-  --yellow: #d4a800;
-  --red: #ff3344;
-  --text: #e8eaf0;
-  --text2: #8a9bb5;
-  --border: #1e2d52;
+  --bg: #f0f4f8;
+  --bg-card: #ffffff;
+  --text: #1a2332;
+  --text2: #5a6a8a;
+  --text3: #8a9bb5;
+  --border: #d0d8e5;
   --radius: 10px;
+  --green: #2e9e5e;
+  --yellow: #d4a800;
+  --red: #dc3545;
 }
 
 html,
@@ -29,7 +28,7 @@ body {
 
 body {
   font-family: Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 8% 8%, #002d6a, var(--bg) 44%), var(--bg);
+  background: var(--bg);
   color: var(--text);
   line-height: 1.45;
 }
@@ -37,7 +36,7 @@ body {
 .spinner {
   position: fixed;
   inset: 0;
-  background: rgba(13, 20, 41, 0.85);
+  background: rgba(240, 244, 248, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -48,7 +47,7 @@ body {
   width: 42px;
   height: 42px;
   border: 3px solid var(--border);
-  border-top-color: var(--blue);
+  border-top-color: var(--gdo-navy);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -64,19 +63,19 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: var(--bg3);
-  border: 1px solid var(--blue);
+  background: var(--bg-card);
+  border: 2px solid var(--gdo-navy);
   border-radius: var(--radius);
   padding: 24px 32px;
   z-index: 101;
   display: none;
   text-align: center;
   min-width: 280px;
-  box-shadow: 0 0 40px rgba(0, 161, 222, 0.24);
+  box-shadow: 0 8px 40px rgba(0, 45, 106, 0.18);
 }
 
 .modal h2 {
-  color: var(--gdo-green);
+  color: var(--gdo-navy);
   font-size: 19px;
   margin-bottom: 8px;
 }
@@ -87,39 +86,27 @@ body {
 }
 
 .topnav {
-  background: rgba(0, 45, 106, 0.92);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 20px;
+  background: var(--gdo-navy);
+  padding: 10px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 50;
-  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(0, 45, 106, 0.15);
 }
 
 .logo-container {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
-.logo-icon {
-  width: 34px;
-  height: 34px;
+.logo-img {
+  height: 40px;
+  width: auto;
   object-fit: contain;
-}
-
-.logo-text {
-  font-size: 22px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: -0.5px;
-}
-
-.logo-text span {
-  color: var(--gdo-green);
 }
 
 .nav-status {
@@ -127,14 +114,15 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 16px;
-  color: var(--gdo-green);
+  color: #fff;
+  font-weight: 500;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--green);
+  background: var(--gdo-green);
   animation: pulse 2s infinite;
 }
 
@@ -153,22 +141,24 @@ body {
 .content {
   max-width: 980px;
   margin: 0 auto;
-  padding: 18px 14px;
+  padding: 24px 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .box {
-  background: linear-gradient(180deg, rgba(22, 34, 73, 0.96), rgba(13, 20, 41, 0.96));
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 18px;
-  transition: border-color 0.2s;
+  padding: 20px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 45, 106, 0.06);
 }
 
 .box:hover {
-  border-color: var(--gdo-teal);
+  border-color: var(--gdo-blue);
+  box-shadow: 0 2px 12px rgba(0, 45, 106, 0.1);
 }
 
 .box-header {
@@ -179,14 +169,14 @@ body {
 }
 
 .box-header svg {
-  color: var(--gdo-green);
+  color: var(--gdo-navy);
   flex-shrink: 0;
 }
 
 .box-header h3 {
   font-size: 18px;
   font-weight: 600;
-  color: #fff;
+  color: var(--gdo-navy);
   flex: 1;
 }
 
@@ -195,7 +185,7 @@ body {
   align-items: center;
   gap: 7px;
   cursor: pointer;
-  color: var(--gdo-green);
+  color: var(--gdo-navy);
   font-size: 16px;
   transition: opacity 0.2s;
   background: transparent;
@@ -203,14 +193,13 @@ body {
 }
 
 .refresh-block:hover {
-  opacity: 0.78;
+  opacity: 0.7;
 }
 
 .refresh {
   animation: spin 0.7s linear infinite;
 }
 
-/* Smaller refresh control specifically for the modem header */
 #refresh {
   font-size: 14px;
   padding: 6px 8px;
@@ -236,8 +225,8 @@ body {
   justify-content: space-between;
   gap: 10px;
   align-items: center;
-  padding: 8px 10px;
-  background: rgba(0, 45, 106, 0.3);
+  padding: 8px 12px;
+  background: #f7f9fc;
   border-radius: 6px;
   font-size: 16px;
 }
@@ -248,7 +237,7 @@ body {
 }
 
 .info-item span {
-  color: #fff;
+  color: var(--text);
   font-weight: 600;
   font-family: Consolas, "Courier New", monospace;
   text-align: right;
@@ -264,15 +253,15 @@ body {
 .signal-card {
   flex: 1;
   min-width: 130px;
-  background: rgba(0, 45, 106, 0.3);
+  background: #f7f9fc;
   border-radius: 8px;
-  padding: 10px;
+  padding: 12px 10px;
   text-align: center;
 }
 
 .signal-card .label {
   font-size: 13px;
-  color: var(--text2);
+  color: var(--text3);
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 4px;
@@ -283,12 +272,12 @@ body {
   font-weight: 700;
   font-family: Consolas, "Courier New", monospace;
   margin-bottom: 8px;
-  color: var(--text2);
+  color: var(--text);
 }
 
 .signal-bar-bg {
   height: 6px;
-  background: rgba(0, 45, 106, 0.6);
+  background: #e0e5ed;
   border-radius: 3px;
   overflow: hidden;
 }
@@ -306,6 +295,7 @@ body {
 
 .signal-mid {
   background: var(--yellow);
+  background: #e6a800;
 }
 
 .signal-bad {
@@ -320,8 +310,10 @@ body {
 
 .config-grid h4 {
   font-size: 17px;
-  color: var(--gdo-green);
+  color: var(--gdo-navy);
   margin-bottom: 10px;
+  border-bottom: 2px solid var(--gdo-blue);
+  padding-bottom: 6px;
 }
 
 .form-group {
@@ -333,16 +325,17 @@ body {
   font-size: 14px;
   color: var(--text2);
   margin-bottom: 4px;
+  font-weight: 500;
 }
 
 .form-group input,
 .form-group select {
   width: 100%;
   padding: 8px 10px;
-  background: rgba(0, 45, 106, 0.3);
+  background: #f7f9fc;
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: #fff;
+  color: var(--text);
   font-size: 16px;
   outline: none;
   transition: border-color 0.2s;
@@ -350,7 +343,8 @@ body {
 
 .form-group input:focus,
 .form-group select:focus {
-  border-color: var(--blue);
+  border-color: var(--gdo-navy);
+  box-shadow: 0 0 0 2px rgba(0, 45, 106, 0.1);
 }
 
 .btn {
@@ -359,7 +353,7 @@ body {
   justify-content: center;
   gap: 6px;
   padding: 10px 20px;
-  background: var(--gdo-teal);
+  background: var(--gdo-navy);
   color: #fff;
   border: 0;
   border-radius: 6px;
@@ -371,8 +365,16 @@ body {
 }
 
 .btn:hover {
-  background: #007a7a;
-  box-shadow: 0 0 20px rgba(0, 148, 148, 0.3);
+  background: #003d8a;
+  box-shadow: 0 2px 12px rgba(0, 45, 106, 0.25);
+}
+
+.btn-secondary {
+  background: var(--gdo-blue);
+}
+
+.btn-secondary:hover {
+  background: #008ac4;
 }
 
 .btn-danger {
@@ -380,19 +382,8 @@ body {
 }
 
 .btn-danger:hover {
-  background: #ff5566;
-  box-shadow: 0 0 20px rgba(255, 51, 68, 0.3);
-}
-
-.btn-gdo {
-  background: var(--gdo-green);
-  color: #002d6a;
-}
-
-.btn-gdo:hover {
-  background: #c4d000;
-  box-shadow: 0 0 20px rgba(168, 180, 0, 0.3);
-  color: #002d6a;
+  background: #c82333;
+  box-shadow: 0 2px 12px rgba(220, 53, 69, 0.25);
 }
 
 .accordion {
@@ -406,7 +397,7 @@ body {
   cursor: pointer;
   font-size: 16px;
   color: var(--text2);
-  background: rgba(0, 45, 106, 0.3);
+  background: #f7f9fc;
   list-style: none;
 }
 
@@ -416,7 +407,7 @@ body {
 
 .accordion summary::before {
   content: "> ";
-  color: var(--gdo-green);
+  color: var(--gdo-navy);
 }
 
 .accordion-body {
@@ -437,7 +428,7 @@ body {
 .fota-status {
   margin-top: 12px;
   padding: 10px;
-  background: rgba(0, 45, 106, 0.3);
+  background: #f7f9fc;
   border-radius: 6px;
   font-size: 16px;
 }
@@ -450,20 +441,20 @@ body {
   text-align: center;
   padding: 18px;
   font-size: 13px;
-  color: var(--text2);
+  color: var(--text3);
 }
 
 @media (max-width: 760px) {
   .topnav {
-    padding: 12px;
+    padding: 10px 14px;
   }
 
-  .logo-text {
-    font-size: 19px;
+  .logo-img {
+    height: 32px;
   }
 
   .content {
-    padding: 12px;
+    padding: 14px;
   }
 
   .info-grid,
