@@ -1,0 +1,49 @@
+{
+  "name": "NodeWay_EG800K",
+  "date": "2026-05-15",
+  "module": "Quectel EG800K-LA",
+  "firmware_package": "NodeWay_EG800K_usr_firmware_2026-05-15.zip",
+  "firmware_path": "/usr",
+  "protected_structure": {
+    "loader": "/usr/main.py",
+    "entrypoint": "/usr/app_main.mpy",
+    "mpy_options": "-mno-unicode -O2",
+    "plain_python_in_usr": [
+      "main.py"
+    ]
+  },
+  "validated_features": [
+    "external_sim_gpio28",
+    "sim_ready_with_iccid",
+    "lte_registration",
+    "pdp_ip_assignment",
+    "embedded_web_server_8080",
+    "rs485_tcp_bridge_5000",
+    "rs485_only_ui",
+    "scheduled_restart",
+    "operator_fallback_by_plmn",
+    "stale_pdp_ip_rejection",
+    "network_recovery_monitor",
+    "mqtt_telemetry"
+  ],
+  "default_ports": {
+    "web": 8080,
+    "rs485_tcp": 5000
+  },
+  "leds": {
+    "net_status": "GPIO29",
+    "status": "GPIO36",
+    "status_mode": "heartbeat",
+    "vdd_ext": "not controlled by firmware"
+  },
+  "mqtt": {
+    "host": "185.187.170.193",
+    "port": 1883,
+    "topic": "MetaSense/ModemEGmini/<IMEI>",
+    "interval_sec": 300
+  },
+  "notes": [
+    "RS232 was removed because this modem hardware has no RS232 port.",
+    "The binary artifact is a ZIP package of the QuecPython /usr firmware tree."
+  ]
+}

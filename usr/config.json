@@ -1,0 +1,77 @@
+{
+  "AUTH": {
+    "User": "admin",
+    "Pass": "admin"
+  },
+  "APN": {
+    "Cid": 1,
+    "PdpType": "IP",
+    "Apn": "",
+    "User": "",
+    "Pass": "",
+    "Auth": 0
+  },
+  "NETMODE": {
+    "Mode": 5
+  },
+  "RS485": {
+    "UARTn": 2,
+    "group": 0,
+    "GPIO_DIR": 25,
+    "Puerto": 5000,
+    "Vel": 9600,
+    "DataBit": 8,
+    "Paridad": 0,
+    "StopBit": 1,
+    "Timeout": 5000
+  },
+  "RESTART": {
+    "Enabled": true,
+    "IntervalHours": 12,
+    "MinUptimeSec": 600
+  },
+  "LEDS": {
+    "Enabled": true,
+    "NetStatusGpio": 29,
+    "StatusGpio": 36,
+    "ActiveLevel": 1,
+    "StatusMode": "heartbeat"
+  },
+  "NETWORK": {
+    "RegistrationTimeoutSec": 120,
+    "PdpTimeoutSec": 60,
+    "MonitorIntervalSec": 15,
+    "StackRestartAfterNoNetworkSec": 300,
+    "PowerRestartAfterNoNetworkSec": 900,
+    "ResetPdpOnBoot": true
+  },
+  "LOCAL_USB": {
+    "Enabled": true,
+    "Mode": "RNDIS",
+    "OpenAfterPdp": true,
+    "RestartAfterModeChange": true
+  },
+  "MQTT": {
+    "Enabled": true,
+    "Host": "185.187.170.193",
+    "Port": 1883,
+    "IntervalSec": 300,
+    "KeepAliveSec": 60,
+    "TopicPrefix": "MetaSense/ModemEGmini",
+    "ClientPrefix": "EG800K",
+    "User": "",
+    "Pass": ""
+  },
+  "MODEM_INIT": {
+    "Enabled": true,
+    "BootDelaySec": 10,
+    "SimTimeoutSec": 30,
+    "DisableSimHotplug": true,
+    "RestartAfterQsimdet": false,
+    "UsbBootGpio": null,
+    "ExternalSim": true,
+    "SimSwitchGpio": 28,
+    "SimExternalLevel": 1,
+    "RestartStackAfterSimSwitch": true
+  }
+}

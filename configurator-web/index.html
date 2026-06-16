@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EP100 Configurator</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>EP100 Configurator</h1>
+        <p class="muted">Lectura y configuracion EP100 por JSON/RS485 y Quectel EC200-A-AU por USB AT.</p>
+      </div>
+      <div class="connection">
+        <label>
+          Modulo
+          <select id="moduleMode">
+            <option value="ep100" selected>EP100 / EG800K</option>
+            <option value="ec200a">EC200-A-AU</option>
+            <option value="auto">Auto Quectel</option>
+          </select>
+        </label>
+        <label>
+          Puerto
+          <select id="serialPort">
+            <option value="COM9" selected>COM9</option>
+          </select>
+        </label>
+        <label>
+          Baud
+          <select id="baudRate">
+            <option value="9600">9600</option>
+            <option value="115200" selected>115200</option>
+            <option value="57600">57600</option>
+            <option value="38400">38400</option>
+            <option value="19200">19200</option>
+          </select>
+        </label>
+        <button id="connectBtn" type="button">Conectar</button>
+        <button id="disconnectBtn" type="button" disabled>Desconectar</button>
+        <span id="statusPill" class="pill off">Sin conexion</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel span-2">
+        <div class="panel-header">
+          <h2>Sistema y 4G</h2>
+          <div class="actions">
+            <button id="readSystemBtn" type="button" disabled>Leer sistema</button>
+            <button id="writeSystemBtn" type="button" disabled>Guardar sistema</button>
+          </div>
+        </div>
+        <div class="status-grid">
+          <div><span>SIM</span><strong id="simStatus">-</strong></div>
+          <div><span>Operador SIM</span><strong id="simOperator">-</strong></div>
+          <div><span>ICCID</span><strong id="iccid">-</strong></div>
+          <div><span>Registro</span><strong id="regStatus">-</strong></div>
+          <div><span>IP</span><strong id="ipAddress">-</strong></div>
+          <div><span>APN</span><strong id="apnStatus">-</strong></div>
+          <div><span>CSQ</span><strong id="csq">-</strong></div>
+          <div><span>Senal LTE</span><strong id="signal">-</strong></div>
+        </div>
+        <form id="systemForm" class="form-grid">
+          <label>
+            Serial
+            <input id="sn" type="text" readonly>
+          </label>
+          <label>
+            Software
+            <input id="softwareName" type="text" readonly>
+          </label>
+          <label>
+            Version software
+            <input id="softwareVersion" type="text" readonly>
+          </label>
+          <label>
+            Firmware
+            <input id="firmwareVersion" type="text" readonly>
+          </label>
+          <label>
+            Password
+            <input id="passwd" type="text" autocomplete="off">
+          </label>
+          <label>
+            Link LED
+            <select id="linkled">
+              <option value="0">0</option>
+              <option value="1">1</option>
+            </select>
+          </label>
+          <label>
+            Reinicio sin red (min)
+            <input id="noNetRst" type="number" min="0" step="1">
+          </label>
+          <label>
+            SIM externa
+            <select id="simEXT">
+              <option value="false">No</option>
+              <option value="true">Si</option>
+            </select>
+          </label>
+          <label>
+            APN
+            <input id="apnName" type="text" autocomplete="off">
+          </label>
+          <label>
+            Usuario APN
+            <input id="apnUser" type="text" autocomplete="off">
+          </label>
+          <label>
+            Password APN
+            <input id="apnPass" type="text" autocomplete="off">
+          </label>
+          <label>
+            Auth APN
+            <select id="apnAuth">
+              <option value="0">0 - Ninguna</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+          <label>
+            NTP host
+            <input id="ntpHost" type="text" autocomplete="off">
+          </label>
+          <label>
+            NTP intervalo
+            <input id="ntpTime" type="number" min="0" step="1">
+          </label>
+          <label>
+            FOTA
+            <input id="fota" type="text" autocomplete="off">
+          </label>
+          <label>
+            Reset
+            <input id="rst" type="text" autocomplete="off">
+          </label>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>UART / RS485</h2>
+          <div class="actions">
+            <button id="readUartBtn" type="button" disabled>Leer UART</button>
+            <button id="writeUartBtn" type="button" disabled>Guardar UART</button>
+          </div>
+        </div>
+        <form id="uartForm" class="form-grid single">
+          <label>
+            Baud rate
+            <select id="uartBr">
+              <option value="9600">9600</option>
+              <option value="19200">19200</option>
+              <option value="38400">38400</option>
+              <option value="57600">57600</option>
+              <option value="115200">115200</option>
+            </select>
+          </label>
+          <label>
+            Data bits
+            <select id="uartDb">
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8" selected>8</option>
+            </select>
+          </label>
+          <label>
+            Parity
+            <select id="uartPa">
+              <option value="0">None</option>
+              <option value="1">Odd</option>
+              <option value="2">Even</option>
+              <option value="3">Mark</option>
+              <option value="4">Space</option>
+            </select>
+          </label>
+          <label>
+            Stop bits
+            <select id="uartSb">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">1.5</option>
+            </select>
+          </label>
+          <label>
+            RX timeout
+            <input id="uartRt" type="number" min="0" step="1">
+          </label>
+          <label>
+            TX timeout
+            <input id="uartSt" type="number" min="0" step="1">
+          </label>
+          <label>
+            Puerto salida red
+            <input id="tcpPort" type="number" min="1" max="65535" step="1" value="4000">
+          </label>
+        </form>
+        <div class="note">Al guardar UART, reconecta usando el nuevo baud rate. El puerto de salida red se usa en la configuracion TCP.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>TCP Socket</h2>
+          <div class="actions">
+            <button id="readSocketBtn" type="button" disabled>Leer TCP</button>
+            <button id="writeSocketBtn" type="button" disabled>Guardar TCP</button>
+          </div>
+        </div>
+        <form id="socketForm" class="form-grid single">
+          <label>
+            Socket
+            <select id="socketNumber">
+              <option value="1">Socket 1</option>
+              <option value="2">Socket 2</option>
+              <option value="3">Socket 3</option>
+              <option value="4">Socket 4</option>
+            </select>
+          </label>
+          <label>
+            Habilitado
+            <select id="socketEnable">
+              <option value="false">No</option>
+              <option value="true">Si</option>
+            </select>
+          </label>
+          <label>
+            Direccion servidor
+            <input id="tcpDomain" type="text" placeholder="dominio o IP" autocomplete="off">
+          </label>
+          <label>
+            Reconexion (s)
+            <input id="tcpRecon" type="number" min="0" step="1">
+          </label>
+          <label>
+            Datos recibidos hacia
+            <select id="tcpDataFlow">
+              <option value="uart_send">UART / RS485</option>
+              <option value="remote_send_0">Remote 0</option>
+              <option value="remote_send_1">Remote 1</option>
+              <option value="remote_send_2">Remote 2</option>
+              <option value="remote_send_3">Remote 3</option>
+              <option value="modbus_master_modbus">Modbus master</option>
+              <option value="dlt64507_master">DLT645 master</option>
+            </select>
+          </label>
+          <label>
+            Registro modo
+            <select id="tcpRegMode">
+              <option value="0">0 - Desactivado</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+          <label>
+            Registro paquete
+            <input id="tcpRegPkg" type="text" autocomplete="off">
+          </label>
+          <label>
+            Heartbeat periodo (s)
+            <input id="tcpHbtMode" type="number" min="0" step="1">
+          </label>
+          <label>
+            Heartbeat paquete
+            <input id="tcpHbtPkg" type="text" autocomplete="off">
+          </label>
+        </form>
+        <div class="note">Modo TCP. El periodo heartbeat en 0 desactiva el heartbeat.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Comandos</h2>
+          <div class="actions">
+            <button id="sendRawBtn" type="button" disabled>Enviar JSON</button>
+          </div>
+        </div>
+        <textarea id="rawCommand" spellcheck="false">{"type":"getSystemInfo","data":{}}</textarea>
+        <div class="quick-actions">
+          <button type="button" class="quick" data-command='{"type":"getSystemInfo","data":{}}'>getSystemInfo</button>
+          <button type="button" class="quick" data-command='{"type":"getUartInfo","data":{}}'>getUartInfo</button>
+          <button type="button" class="quick" data-command='{"type":"getSocketInfo","data":{"socket":1}}'>getSocketInfo 1</button>
+        </div>
+      </section>
+
+      <section class="panel span-2">
+        <div class="panel-header">
+          <h2>Log</h2>
+          <div class="actions">
+            <button id="clearLogBtn" type="button">Limpiar</button>
+          </div>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

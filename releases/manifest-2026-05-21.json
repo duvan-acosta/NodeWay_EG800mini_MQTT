@@ -1,0 +1,56 @@
+{
+    "name":  "NodeWay_EG800K",
+    "date":  "2026-05-21",
+    "module":  "Quectel EG800K-LA",
+    "base_firmware":  "EG800KLALCR07A05M04_OCPU_QPY",
+    "firmware_package":  "NodeWay_EG800K_usr_firmware_2026-05-21.zip",
+    "firmware_path":  "/usr",
+    "entrypoint":  "/usr/main.py -\u003e usr.app_main.main()",
+    "packaging":  {
+                      "validated_runtime":  "/usr/app_main.py",
+                      "protected_mpy_pending":  true,
+                      "note":  "app_main.mpy generated locally did not expose main() on EG800K, so it is intentionally excluded from this validated package."
+                  },
+    "validated_features":  [
+                               "external_sim_gpio28",
+                               "sim_ready_with_iccid",
+                               "lte_registration",
+                               "pdp_ip_assignment",
+                               "local_usb_rndis_dhcp_192_168_0_1",
+                               "embedded_web_server_8080",
+                               "rs485_tcp_bridge_5000",
+                               "rs485_only_ui",
+                               "scheduled_restart",
+                               "operator_name_from_network",
+                               "operator_fallback_by_plmn",
+                               "stale_pdp_ip_rejection",
+                               "network_recovery_monitor",
+                               "mqtt_telemetry"
+                           ],
+    "default_ports":  {
+                          "web":  8080,
+                          "rs485_tcp":  5000
+                      },
+    "local_usb":  {
+                      "mode":  "RNDIS",
+                      "dhcp_client_ip_observed":  "192.168.0.100",
+                      "modem_ip":  "192.168.0.1"
+                  },
+    "leds":  {
+                 "net_status":  "GPIO29",
+                 "status":  "GPIO36",
+                 "status_mode":  "heartbeat",
+                 "vdd_ext":  "not controlled by firmware"
+             },
+    "mqtt":  {
+                 "host":  "185.187.170.193",
+                 "port":  1883,
+                 "topic":  "MetaSense/ModemEGmini/\u003cIMEI\u003e",
+                 "interval_sec":  300
+             },
+    "notes":  [
+                  "RS232 was removed because this modem hardware has no RS232 port.",
+                  "Use http://192.168.0.1:8080/ for local web access after RNDIS enumerates.",
+                  "The binary artifact is a ZIP package of the QuecPython /usr firmware tree."
+              ]
+}
