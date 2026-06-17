@@ -22,11 +22,17 @@ logger = log.getLogger("MAIN")
 CONFIG_PATH = "/usr/config.json"
 WEB_PORT = 8080
 FIRMWARE_VERSION = "EG800K-EP100-0.1.0"
+CONFIG_VERSION = 4
 USB_BOOT_GPIO = None
+AUTH_REALM = "NodeWay EG800K"
+SESSION_COOKIE = "nodeway_session"
+SESSION_TTL_MS = 24 * 3600 * 1000
+auth_sessions = {}
 
 uart1 = None
 uart2 = None
 uart_lock = _thread.allocate_lock()
+mqtt_lock = _thread.allocate_lock()
 fota_state = {"status": "idle", "message": "Sin actividad", "progress": 0, "result": ""}
 boot_ms = utime.ticks_ms()
 sim_state = {
@@ -60,20 +66,33 @@ SIM_PROVIDER_ALIASES = (
 def read_config():
     with open(CONFIG_PATH, "r") as f:
         config = ujson.load(f)
-    return normalize_config(config)
+    if "RS485_2" in config and "RS485" not in config:
+        config["RS485"] = config["RS485_2"]
+    if "RS485_1" in config and "RS485" not in config:
+        config["RS485"] = config["RS485_1"]
+    config = normalize_config(config)
+    if apply_config_migrations(config):
+        persist_config(config)
+        config = normalize_config(config)
+    return config
 
 
-def write_config(config):
+def persist_config(config):
     config = normalize_config(config)
     with open(CONFIG_PATH, "w") as f:
         f.write(ujson.dumps(config))
 
 
+def write_config(config):
+    persist_config(config)
+
+
 def default_config():
     return {
+        "CONFIG_VERSION": CONFIG_VERSION,
         "AUTH": {"User": "admin", "Pass": "admin"},
         "APN": {"Cid": 1, "PdpType": "IP", "Apn": "", "User": "", "Pass": "", "Auth": 0},
-        "NETMODE": {"Mode": 5},
+        "NETMODE": {"Mode": 12},
         "RS485": {
             "UARTn": 2,
             "group": 0,
@@ -105,7 +124,7 @@ def default_config():
             "Enabled": True,
             "Mode": "RNDIS",
             "OpenAfterPdp": True,
-            "RestartAfterModeChange": True,
+            "RestartAfterModeChange": False,
         },
         "MQTT": {
             "Enabled": True,
@@ -155,16 +174,220 @@ def normalize_config(config):
         config["RS485"] = config["RS485_2"]
     if "RS485_1" in config and "RS485" not in config:
         config["RS485"] = config["RS485_1"]
-    return merge_dict(defaults, config)
+    merged = merge_dict(defaults, config)
+    try:
+        merged["CONFIG_VERSION"] = int(merged.get("CONFIG_VERSION", CONFIG_VERSION) or CONFIG_VERSION)
+    except:
+        merged["CONFIG_VERSION"] = CONFIG_VERSION
+    return merged
 
 
-def json_response(response, payload, code=200):
+def apply_config_migrations(config):
+    changed = False
+    try:
+        version = int(config.get("CONFIG_VERSION", 1) or 1)
+    except:
+        version = 1
+
+    network = config.setdefault("NETWORK", {})
+    stack = int(network.get("StackRestartAfterNoNetworkSec", 0) or 0)
+    power = int(network.get("PowerRestartAfterNoNetworkSec", 0) or 0)
+
+    if version < 2:
+        usb = config.setdefault("LOCAL_USB", {})
+        if usb.get("RestartAfterModeChange", True):
+            logger.info("CONFIG migration: RestartAfterModeChange -> false")
+            usb["RestartAfterModeChange"] = False
+            changed = True
+        config["CONFIG_VERSION"] = 2
+        changed = True
+        version = 2
+
+    if version < 3:
+        if stack == 0 and power == 0:
+            network["StackRestartAfterNoNetworkSec"] = 300
+            network["PowerRestartAfterNoNetworkSec"] = 900
+            logger.info(
+                "CONFIG migration v3: network recovery enabled stack=300s power=900s"
+            )
+            changed = True
+        config["CONFIG_VERSION"] = 3
+        changed = True
+        version = 3
+
+    if version < CONFIG_VERSION:
+        netmode = config.setdefault("NETMODE", {})
+        if int(netmode.get("Mode", 5) or 5) == 5:
+            netmode["Mode"] = 12
+            logger.info("CONFIG migration v4: NETMODE.Mode 5 (4G default) -> 12 (Auto)")
+            changed = True
+        config["CONFIG_VERSION"] = CONFIG_VERSION
+        changed = True
+
+    return changed
+
+
+def restart_policy_payload(config):
+    restart = config.get("RESTART", {})
+    network = config.get("NETWORK", {})
+    stack = int(network.get("StackRestartAfterNoNetworkSec", 0) or 0)
+    power = int(network.get("PowerRestartAfterNoNetworkSec", 0) or 0)
+    return {
+        "Enabled": bool(restart.get("Enabled", True)),
+        "IntervalHours": float(restart.get("IntervalHours", 12) or 12),
+        "IntervalSeconds": int(restart.get("IntervalSeconds", 0) or 0),
+        "MinUptimeSec": int(restart.get("MinUptimeSec", 600) or 600),
+        "NetworkRecoveryEnabled": stack > 0 or power > 0,
+        "StackRestartAfterNoNetworkSec": stack,
+        "PowerRestartAfterNoNetworkSec": power,
+        "ConfigVersion": int(config.get("CONFIG_VERSION", CONFIG_VERSION) or CONFIG_VERSION),
+    }
+
+
+def mqtt_config_payload(config):
+    mqtt = config.get("MQTT", {})
+    imei = safe_call(modem.getDevImei, "") or "unknown"
+    topic_prefix = str(mqtt.get("TopicPrefix", "MetaSense/ModemEGmini"))
+    return {
+        "Enabled": bool(mqtt.get("Enabled", True)),
+        "Host": str(mqtt.get("Host", "")),
+        "Port": int(mqtt.get("Port", 1883) or 1883),
+        "IntervalSec": int(mqtt.get("IntervalSec", 300) or 300),
+        "KeepAliveSec": int(mqtt.get("KeepAliveSec", 60) or 60),
+        "TopicPrefix": topic_prefix,
+        "Topic": "{}/{}".format(topic_prefix, imei),
+        "ClientPrefix": str(mqtt.get("ClientPrefix", "EG800K")),
+        "User": str(mqtt.get("User", "")),
+        "Pass": str(mqtt.get("Pass", "")),
+    }
+
+
+def json_response(response, payload, code=200, extra_headers=None):
+    headers = {"Access-Control-Allow-Origin": "*"}
+    if extra_headers:
+        for key in extra_headers:
+            headers[key] = extra_headers[key]
     response.WriteResponse(
         code,
-        {"Access-Control-Allow-Origin": "*"},
+        headers,
         "application/json",
         "UTF-8",
         ujson.dumps(payload),
+    )
+
+
+def get_cookie(headers, name):
+    cookie_header = headers.get("cookie", "")
+    if not cookie_header:
+        return ""
+    target = name + "="
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.startswith(target):
+            return part[len(target) :]
+    return ""
+
+
+def parse_basic_auth(headers):
+    auth = headers.get("authorization", "")
+    if not auth or auth[:6].lower() != "basic ":
+        return "", ""
+    try:
+        import ubinascii
+
+        raw = auth[6:].strip()
+        padding = (-len(raw)) % 4
+        if padding:
+            raw += "=" * padding
+        decoded = ubinascii.a2b_base64(raw).decode()
+        sep = decoded.find(":")
+        if sep < 0:
+            return decoded, ""
+        return decoded[:sep], decoded[sep + 1 :]
+    except Exception as e:
+        logger.error("basic auth parse error {}".format(e))
+        return "", ""
+
+
+def get_auth_credentials():
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            cfg = ujson.load(f)
+        auth = cfg.get("AUTH", {})
+        return str(auth.get("User", "admin")).strip(), str(auth.get("Pass", "admin"))
+    except:
+        return "admin", "admin"
+
+
+def credentials_valid(user, password):
+    expected_user, expected_pass = get_auth_credentials()
+    return str(user).strip() == expected_user and str(password) == expected_pass
+
+
+def create_session_token(user):
+    imei = safe_call(modem.getDevImei, "0")
+    return "{:08x}{:08x}{:08x}".format(
+        utime.ticks_ms() & 0xFFFFFFFF,
+        utime.time() & 0xFFFFFFFF,
+        (len(user) * 131 + len(imei) * 17 + (ord(user[0]) if user else 0)) & 0xFFFFFFFF,
+    )
+
+
+def register_session(token):
+    auth_sessions[token] = utime.time() + 86400
+
+
+def session_valid(token):
+    if not token:
+        return False
+    expiry = auth_sessions.get(token)
+    if not expiry:
+        return False
+    if utime.time() >= expiry:
+        auth_sessions.pop(token, None)
+        return False
+    return True
+
+
+def invalidate_session(token):
+    if token:
+        auth_sessions.pop(token, None)
+
+
+def is_authenticated(client):
+    headers = client.GetRequestHeaders()
+    token = get_cookie(headers, SESSION_COOKIE)
+    if session_valid(token):
+        return True
+    user, password = parse_basic_auth(headers)
+    return credentials_valid(user, password)
+
+
+def require_auth(client, response):
+    if is_authenticated(client):
+        return True
+    response.WriteResponseUnauthorized(AUTH_REALM)
+    return False
+
+
+def auth_route(url, method="GET"):
+    def decorator(func):
+        @WebSrv.route(url, method)
+        def wrapped(client, response, *args):
+            if not require_auth(client, response):
+                return
+            return func(client, response, *args)
+
+        return func
+
+    return decorator
+
+
+def serve_www_file(response, filename, content_type):
+    response.WriteResponseFile(
+        "/usr/www/" + filename,
+        content_type,
+        headers={"Cache-Control": "no-cache"},
     )
 
 
@@ -215,6 +438,34 @@ def socket_tcp_server():
         )
     except:
         return usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
+
+
+def socket_tcp_client(local_ip):
+    try:
+        sock = usocket.socket(
+            usocket.AF_INET, usocket.SOCK_STREAM, usocket.TCP_CUSTOMIZE_PORT
+        )
+    except:
+        sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
+    if local_ip:
+        sock.bind((local_ip, 0))
+    return sock
+
+
+def resolve_host_addr(host, port):
+    host = str(host or "").strip()
+    port = int(port)
+    parts = host.split(".")
+    if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        return (host, port)
+    return usocket.getaddrinfo(host, port)[0][-1]
+
+
+def mqtt_connect_retriable_errno(errno):
+    try:
+        return int(errno) in (103, 104, 107, 110, 111, 113, 116)
+    except:
+        return False
 
 
 def client_conn_proc(conn, ip_addr, port, conf):
@@ -572,12 +823,11 @@ def modem_status_payload():
     elif isinstance(net_mode, int):
         net_mode_value = net_mode
 
-    net_config = safe_call(net.getConfig, None)
-    net_config_value = None
-    if isinstance(net_config, (tuple, list)) and len(net_config) > 0:
-        net_config_value = net_config[0]
-    elif isinstance(net_config, int):
-        net_config_value = net_config
+    try:
+        saved_mode = int(read_config().get("NETMODE", {}).get("Mode", 12))
+    except:
+        saved_mode = 12
+    net_config_value = saved_mode
 
     local_usb = {"available": USBNET is not None, "worktype": None, "status": None}
     if USBNET is not None:
@@ -618,10 +868,59 @@ def modem_status_payload():
         "RSRQ": lte[2] if len(lte) > 2 else 255,
         "CQI": lte[3] if len(lte) > 3 else 255,
         "SINR": lte[4] if len(lte) > 4 else 255,
+        "UptimeSec": int(utime.ticks_diff(utime.ticks_ms(), boot_ms) / 1000),
         "Motivo_Arranque": safe_call(Power.powerOnReason, ""),
         "Motivo_Apagado": safe_call(Power.powerDownReason, ""),
         "Estado_Supercondensador": "",
     }
+
+
+def mqtt_test_payload():
+    status = modem_status_payload()
+    return {
+        "event": "test",
+        "imei": status.get("IMEI", ""),
+        "ip": runtime_state.get("ip") or status.get("IP_SIM", ""),
+        "firmware": status.get("Firmware", ""),
+        "operator": status.get("Operador", ""),
+        "net_mode": status.get("NetModeText", ""),
+        "rssi": status.get("RSSI", 99),
+        "rsrp": status.get("RSRP", 99),
+        "rsrq": status.get("RSRQ", 255),
+        "cqi": status.get("CQI", 255),
+        "sinr": status.get("SINR", 255),
+        "timestamp": utime.time(),
+    }
+
+
+def merge_mqtt_request(body, base=None):
+    if base is None:
+        base = read_config().get("MQTT", {})
+    mqtt = {
+        "Host": str(base.get("Host", "")).strip(),
+        "Port": int(base.get("Port", 1883) or 1883),
+        "KeepAliveSec": int(base.get("KeepAliveSec", 60) or 60),
+        "TopicPrefix": str(base.get("TopicPrefix", "MetaSense/ModemEGmini")).strip(),
+        "ClientPrefix": str(base.get("ClientPrefix", "EG800K")).strip(),
+        "User": str(base.get("User", "")).strip(),
+        "Pass": str(base.get("Pass", "")),
+    }
+    if isinstance(body, dict):
+        if "Host" in body:
+            mqtt["Host"] = str(body.get("Host", mqtt["Host"])).strip()
+        if "Port" in body:
+            mqtt["Port"] = int(body.get("Port", mqtt["Port"]) or mqtt["Port"])
+        if "KeepAliveSec" in body:
+            mqtt["KeepAliveSec"] = int(body.get("KeepAliveSec", mqtt["KeepAliveSec"]) or mqtt["KeepAliveSec"])
+        if "TopicPrefix" in body:
+            mqtt["TopicPrefix"] = str(body.get("TopicPrefix", mqtt["TopicPrefix"])).strip()
+        if "ClientPrefix" in body:
+            mqtt["ClientPrefix"] = str(body.get("ClientPrefix", mqtt["ClientPrefix"])).strip()
+        if "User" in body:
+            mqtt["User"] = str(body.get("User", mqtt["User"])).strip()
+        if "Pass" in body:
+            mqtt["Pass"] = str(body.get("Pass", mqtt["Pass"]))
+    return mqtt
 
 
 def telemetry_payload():
@@ -705,29 +1004,61 @@ def pdp_type_to_str(value):
     return "IP"
 
 
+def sanitize_apn_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        if not value or b"\x00" in value:
+            return ""
+        try:
+            value = value.decode("utf-8")
+        except:
+            try:
+                value = value.decode("latin-1")
+            except:
+                return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    for ch in text:
+        code = ord(ch)
+        if code < 32 or code == 127 or code == 0xFFFD:
+            return ""
+    return text
+
+
 def get_apn_payload():
     config = read_config()
     cfg = config.get("APN", {})
     cid = int(cfg.get("Cid", 1))
-    apn = cfg.get("Apn", "")
-    user = cfg.get("User", "")
-    password = cfg.get("Pass", "")
-    auth = cfg.get("Auth", 0)
+    apn = sanitize_apn_text(cfg.get("Apn", ""))
+    user = sanitize_apn_text(cfg.get("User", ""))
+    password = sanitize_apn_text(cfg.get("Pass", ""))
+    auth = int(cfg.get("Auth", 0) or 0)
     pdp_type = pdp_type_to_int(cfg.get("PdpType", "IP"))
 
     try:
         raw = dataCall.getPDPContext(cid)
         if raw and len(raw) > 1:
             pdp_type = raw[0]
-            apn = raw[1] or apn
-            if len(raw) > 2:
-                user = raw[2] or user
-            if len(raw) > 3:
-                password = raw[3] or password
+            modem_apn = sanitize_apn_text(raw[1])
+            if modem_apn:
+                apn = modem_apn
             if len(raw) > 4:
-                auth = raw[4]
+                auth = int(raw[4] or 0)
+            if auth > 0:
+                modem_user = sanitize_apn_text(raw[2] if len(raw) > 2 else "")
+                modem_pass = sanitize_apn_text(raw[3] if len(raw) > 3 else "")
+                if modem_user:
+                    user = modem_user
+                if modem_pass:
+                    password = modem_pass
     except:
         pass
+
+    if auth <= 0:
+        user = ""
+        password = ""
 
     return {
         "cid": cid,
@@ -740,21 +1071,97 @@ def get_apn_payload():
     }
 
 
-@WebSrv.route("/command/getmodemstatus", "GET")
+@WebSrv.route("/login", "GET")
+def route_login_page(client, response):
+    serve_www_file(response, "login.html", "text/html")
+
+
+@WebSrv.route("/login.css", "GET")
+def route_login_css(client, response):
+    serve_www_file(response, "login.css", "text/css")
+
+
+@WebSrv.route("/login.js", "GET")
+def route_login_js(client, response):
+    serve_www_file(response, "login.js", "application/javascript")
+
+
+@WebSrv.route("/favicon.svg", "GET")
+def route_favicon(client, response):
+    serve_www_file(response, "favicon.svg", "image/svg+xml")
+
+
+@WebSrv.route("/command/login", "POST")
+def route_login(client, response):
+    try:
+        body = client.ReadRequestContentAsJSON() or {}
+        user = str(body.get("user", body.get("User", ""))).strip()
+        password = str(body.get("pass", body.get("Pass", body.get("password", ""))))
+        if not credentials_valid(user, password):
+            json_response(response, {"status": "error", "message": "Credenciales invalidas"}, 401)
+            return
+        token = create_session_token(user)
+        register_session(token)
+        json_response(
+            response,
+            {"status": "success"},
+            extra_headers={
+                "Set-Cookie": "{}={}; Path=/; Max-Age=86400; HttpOnly".format(SESSION_COOKIE, token)
+            },
+        )
+    except Exception as exc:
+        logger.info("login error: {}".format(exc))
+        json_response(response, {"status": "error", "message": "Error interno de autenticacion"}, 500)
+
+
+@WebSrv.route("/command/auth-check", "GET")
+def route_auth_check(client, response):
+    if is_authenticated(client):
+        json_response(response, {"status": "authenticated"})
+    else:
+        json_response(response, {"status": "unauthenticated"}, 401)
+
+
+@auth_route("/command/logout", "POST")
+def route_logout(client, response):
+    token = get_cookie(client.GetRequestHeaders(), SESSION_COOKIE)
+    invalidate_session(token)
+    json_response(
+        response,
+        {"status": "success"},
+        extra_headers={"Set-Cookie": "{}=; Path=/; Max-Age=0".format(SESSION_COOKIE)},
+    )
+
+
+@auth_route("/command/getmodemstatus", "GET")
 def route_get_modem_status(client, response):
     json_response(response, modem_status_payload())
 
 
 @WebSrv.route("/", "GET")
 def route_root(client, response):
-    response.WriteResponseFile(
-        "/usr/www/index.html",
-        "text/html",
-        headers={"Cache-Control": "no-cache"},
-    )
+    if not is_authenticated(client):
+        response.WriteResponseRedirect("/login")
+        return
+    serve_www_file(response, "index.html", "text/html")
 
 
-@WebSrv.route("/command/getconfig", "GET")
+@auth_route("/index.html", "GET")
+def route_index_html(client, response):
+    serve_www_file(response, "index.html", "text/html")
+
+
+@auth_route("/index.css", "GET")
+def route_index_css(client, response):
+    serve_www_file(response, "index.css", "text/css")
+
+
+@auth_route("/index.js", "GET")
+def route_index_js(client, response):
+    serve_www_file(response, "index.js", "application/javascript")
+
+
+@auth_route("/command/getconfig", "GET")
 def route_get_config(client, response):
     try:
         json_response(response, ui_config_payload(read_config()))
@@ -762,7 +1169,7 @@ def route_get_config(client, response):
         json_response(response, {"status": "error", "message": repr(e)}, 500)
 
 
-@WebSrv.route("/command/setconfig", "POST")
+@auth_route("/command/setconfig", "POST")
 def route_set_config(client, response):
     try:
         body = client.ReadRequestContentAsJSON()
@@ -774,25 +1181,27 @@ def route_set_config(client, response):
                 config["RS485"].update(body["RS485_2"])
         write_config(config)
         json_response(response, {"status": "success", "config": ui_config_payload(config)})
+        logger.info("RESTART_REASON=config_change RS485")
         utime.sleep(1)
         Power.powerRestart()
     except Exception as e:
         json_response(response, {"status": "error", "message": repr(e)}, 500)
 
 
-@WebSrv.route("/command/restartmodem", "POST")
+@auth_route("/command/restartmodem", "POST")
 def route_restart_modem(client, response):
     json_response(response, {"status": "success"})
+    logger.info("RESTART_REASON=manual_web")
     utime.sleep(1)
     Power.powerRestart()
 
 
-@WebSrv.route("/command/getapn", "GET")
+@auth_route("/command/getapn", "GET")
 def route_get_apn(client, response):
     json_response(response, get_apn_payload())
 
 
-@WebSrv.route("/command/setapn", "POST")
+@auth_route("/command/setapn", "POST")
 def route_set_apn(client, response):
     try:
         if not is_sim_ready():
@@ -805,10 +1214,13 @@ def route_set_apn(client, response):
         body = client.ReadRequestContentAsJSON() or {}
         cid = int(body.get("cid", 1))
         pdp_type = pdp_type_to_int(body.get("pdp_type", "IP"))
-        apn = str(body.get("apn", "")).strip()
-        user = str(body.get("user", "")).strip()
-        password = str(body.get("password", "")).strip()
+        apn = sanitize_apn_text(body.get("apn", ""))
+        user = sanitize_apn_text(body.get("user", ""))
+        password = sanitize_apn_text(body.get("password", ""))
         auth = int(body.get("auth", 0))
+        if auth <= 0:
+            user = ""
+            password = ""
 
         config = read_config()
         config["APN"] = {
@@ -838,12 +1250,12 @@ def route_set_apn(client, response):
         json_response(response, {"status": "error", "message": repr(e)}, 500)
 
 
-@WebSrv.route("/command/getrestart", "GET")
+@auth_route("/command/getrestart", "GET")
 def route_get_restart(client, response):
-    json_response(response, read_config().get("RESTART", {}))
+    json_response(response, restart_policy_payload(read_config()))
 
 
-@WebSrv.route("/command/setrestart", "POST")
+@auth_route("/command/setrestart", "POST")
 def route_set_restart(client, response):
     try:
         body = client.ReadRequestContentAsJSON() or {}
@@ -852,18 +1264,103 @@ def route_set_restart(client, response):
             {
                 "Enabled": bool(body.get("Enabled", True)),
                 "IntervalHours": float(body.get("IntervalHours", 12)),
-                "MinUptimeSec": int(body.get("MinUptimeSec", config["RESTART"].get("MinUptimeSec", 600))),
+                "MinUptimeSec": int(
+                    body.get("MinUptimeSec", config["RESTART"].get("MinUptimeSec", 600))
+                ),
             }
         )
         if "IntervalSeconds" in body:
             config["RESTART"]["IntervalSeconds"] = int(body.get("IntervalSeconds") or 0)
+
+        network = config.setdefault("NETWORK", {})
+        if "NetworkRecoveryEnabled" in body:
+            if bool(body.get("NetworkRecoveryEnabled")):
+                network["StackRestartAfterNoNetworkSec"] = int(
+                    body.get("StackRestartAfterNoNetworkSec", 300) or 300
+                )
+                network["PowerRestartAfterNoNetworkSec"] = int(
+                    body.get("PowerRestartAfterNoNetworkSec", 900) or 900
+                )
+            else:
+                network["StackRestartAfterNoNetworkSec"] = 0
+                network["PowerRestartAfterNoNetworkSec"] = 0
+        else:
+            if "StackRestartAfterNoNetworkSec" in body:
+                network["StackRestartAfterNoNetworkSec"] = int(
+                    body.get("StackRestartAfterNoNetworkSec") or 0
+                )
+            if "PowerRestartAfterNoNetworkSec" in body:
+                network["PowerRestartAfterNoNetworkSec"] = int(
+                    body.get("PowerRestartAfterNoNetworkSec") or 0
+                )
+
         write_config(config)
-        json_response(response, {"status": "success", "RESTART": config["RESTART"]})
+        json_response(
+            response,
+            {"status": "success", "RESTART": restart_policy_payload(config)},
+        )
     except Exception as e:
         json_response(response, {"status": "error", "message": repr(e)}, 500)
 
 
-@WebSrv.route("/command/setnetmode", "POST")
+@auth_route("/command/getmqtt", "GET")
+def route_get_mqtt(client, response):
+    json_response(response, mqtt_config_payload(read_config()))
+
+
+@auth_route("/command/setmqtt", "POST")
+def route_set_mqtt(client, response):
+    try:
+        body = client.ReadRequestContentAsJSON() or {}
+        config = read_config()
+        mqtt = config.setdefault("MQTT", {})
+        mqtt.update(
+            {
+                "Enabled": bool(body.get("Enabled", mqtt.get("Enabled", True))),
+                "Host": str(body.get("Host", mqtt.get("Host", ""))).strip(),
+                "Port": int(body.get("Port", mqtt.get("Port", 1883)) or 1883),
+                "IntervalSec": int(body.get("IntervalSec", mqtt.get("IntervalSec", 300)) or 300),
+                "KeepAliveSec": int(body.get("KeepAliveSec", mqtt.get("KeepAliveSec", 60)) or 60),
+                "TopicPrefix": str(body.get("TopicPrefix", mqtt.get("TopicPrefix", "MetaSense/ModemEGmini"))).strip(),
+                "ClientPrefix": str(body.get("ClientPrefix", mqtt.get("ClientPrefix", "EG800K"))).strip(),
+                "User": str(body.get("User", mqtt.get("User", ""))).strip(),
+                "Pass": str(body.get("Pass", mqtt.get("Pass", ""))),
+            }
+        )
+        write_config(config)
+        json_response(response, {"status": "success", "MQTT": mqtt_config_payload(config)})
+    except Exception as e:
+        json_response(response, {"status": "error", "message": repr(e)}, 500)
+
+
+@auth_route("/command/mqtt-test", "POST")
+def route_mqtt_test(client, response):
+    try:
+        body = client.ReadRequestContentAsJSON() or {}
+        mqtt_cfg = merge_mqtt_request(body)
+        payload_obj = mqtt_test_payload()
+        result = mqtt_publish_with_payload(mqtt_cfg, payload_obj)
+        if result.get("ok"):
+            json_response(
+                response,
+                {
+                    "status": "success",
+                    "message": "Mensaje de prueba enviado",
+                    "topic": result.get("topic", ""),
+                    "payload": payload_obj,
+                },
+            )
+            return
+        json_response(
+            response,
+            {"status": "error", "message": result.get("message", "No se pudo publicar el mensaje MQTT")},
+            502,
+        )
+    except Exception as e:
+        json_response(response, {"status": "error", "message": repr(e)}, 500)
+
+
+@auth_route("/command/setnetmode", "POST")
 def route_set_net_mode(client, response):
     try:
         body = client.ReadRequestContentAsJSON() or {}
@@ -871,22 +1368,18 @@ def route_set_net_mode(client, response):
         config = read_config()
         config["NETMODE"] = {"Mode": mode}
         write_config(config)
-        result = None
-        try:
-            result = net.setConfig(mode)
-        except Exception as e:
-            result = repr(e)
-        json_response(response, {"status": "success", "mode": mode, "result": result})
+        _thread.start_new_thread(net_mode_worker, (mode,))
+        json_response(response, {"status": "success", "mode": mode, "pending": True})
     except Exception as e:
         json_response(response, {"status": "error", "message": repr(e)}, 500)
 
 
-@WebSrv.route("/command/fota-status", "GET")
+@auth_route("/command/fota-status", "GET")
 def route_fota_status(client, response):
     json_response(response, fota_state)
 
 
-@WebSrv.route("/command/start-fota", "POST")
+@auth_route("/command/start-fota", "POST")
 def route_start_fota(client, response):
     fota_state["status"] = "unsupported"
     fota_state["message"] = "FOTA aun no esta implementado para EG800K"
@@ -894,7 +1387,7 @@ def route_start_fota(client, response):
     ok_response(response, "<h2>FOTA aun no esta implementado para EG800K.</h2>")
 
 
-@WebSrv.route("/start-fota", "POST")
+@auth_route("/start-fota", "POST")
 def route_start_fota_legacy(client, response):
     route_start_fota(client, response)
 
@@ -920,10 +1413,13 @@ def apply_pdp_config(config):
     cfg = config.get("APN", {})
     net_cfg = config.get("NETWORK", {})
     cid = int(cfg.get("Cid", 1))
-    apn = str(cfg.get("Apn", "")).strip()
-    user = str(cfg.get("User", "")).strip()
-    password = str(cfg.get("Pass", "")).strip()
-    auth = int(cfg.get("Auth", 0))
+    apn = sanitize_apn_text(cfg.get("Apn", ""))
+    user = sanitize_apn_text(cfg.get("User", ""))
+    password = sanitize_apn_text(cfg.get("Pass", ""))
+    auth = int(cfg.get("Auth", 0) or 0)
+    if auth <= 0:
+        user = ""
+        password = ""
     pdp_type = pdp_type_to_int(cfg.get("PdpType", "IP"))
 
     try:
@@ -950,6 +1446,7 @@ def apply_pdp_config(config):
     elif current:
         logger.info("PDP context kept from modem because APN config is empty")
 
+    ensure_pdp_auto_reconnect(cid)
     try:
         ret = dataCall.activate(cid)
         logger.info("PDP activate cid {} ret {}".format(cid, ret))
@@ -975,7 +1472,11 @@ def get_valid_pdp_ip(cid):
         return ""
     try:
         info = dataCall.getInfo(cid, 0)
-        ip = info[2][2]
+        nic = info[2]
+        if nic[0] != 1:
+            runtime_state["ip"] = ""
+            return ""
+        ip = nic[2]
         if ip and ip != "0.0.0.0":
             runtime_state["ip"] = ip
             return ip
@@ -983,6 +1484,14 @@ def get_valid_pdp_ip(cid):
         pass
     runtime_state["ip"] = ""
     return ""
+
+
+def ensure_pdp_auto_reconnect(cid):
+    try:
+        dataCall.setAutoActivate(cid, 1)
+        dataCall.setAutoConnect(cid, 1)
+    except Exception as e:
+        logger.error("PDP auto reconnect config error {}".format(e))
 
 
 def wait_for_ip(cid, seconds):
@@ -1027,8 +1536,8 @@ def ensure_local_usb_network(config):
         try:
             ret = USBNET.set_worktype(target)
             logger.info("USBNET set_worktype ret {}".format(ret))
-            if ret == 0 and usb_cfg.get("RestartAfterModeChange", True):
-                logger.info("USBNET mode changed; restarting module to apply")
+            if ret == 0 and usb_cfg.get("RestartAfterModeChange", False):
+                logger.info("RESTART_REASON=usb_mode_change; restarting module to apply")
                 utime.sleep(1)
                 Power.powerRestart()
                 return False
@@ -1110,13 +1619,23 @@ def led_worker(config):
         logger.error("LED worker error {}".format(e))
 
 
-def apply_saved_net_mode(config):
+def apply_net_mode(mode):
     try:
-        mode = int(config.get("NETMODE", {}).get("Mode", 12))
-        ret = net.setConfig(mode)
+        ret = net.setConfig(int(mode))
         logger.info("Network mode applied: {} ret {}".format(mode, ret))
+        return ret
     except Exception as e:
         logger.error("Network mode apply error {}".format(e))
+        return repr(e)
+
+
+def net_mode_worker(mode):
+    apply_net_mode(mode)
+
+
+def apply_saved_net_mode(config):
+    mode = int(config.get("NETMODE", {}).get("Mode", 12))
+    apply_net_mode(mode)
 
 
 def start_tcp_bridges(config):
@@ -1161,7 +1680,11 @@ def scheduled_restart_worker(config):
     while True:
         uptime_seconds = int(utime.ticks_diff(utime.ticks_ms(), boot_ms) / 1000)
         if uptime_seconds >= min_uptime and uptime_seconds >= interval_seconds:
-            logger.info("Scheduled restart triggered after {} seconds".format(uptime_seconds))
+            logger.info(
+                "RESTART_REASON=scheduled interval={}s uptime={}s".format(
+                    interval_seconds, uptime_seconds
+                )
+            )
             utime.sleep(1)
             Power.powerRestart()
         utime.sleep(10)
@@ -1176,9 +1699,17 @@ def network_monitor_worker(config):
     interval = int(net_cfg.get("MonitorIntervalSec", 15) or 15)
     stack_restart_sec = int(net_cfg.get("StackRestartAfterNoNetworkSec", 300) or 0)
     power_restart_sec = int(net_cfg.get("PowerRestartAfterNoNetworkSec", 900) or 0)
+    recovery_enabled = stack_restart_sec > 0 or power_restart_sec > 0
     lost_since = None
     stack_restarted = False
-    logger.info("Network monitor enabled interval={}s".format(interval))
+    if recovery_enabled:
+        logger.info(
+            "Network monitor enabled interval={}s stack_restart={}s power_restart={}s".format(
+                interval, stack_restart_sec, power_restart_sec
+            )
+        )
+    else:
+        logger.info("Network monitor enabled interval={}s without auto-restart".format(interval))
     while True:
         registered = is_cellular_registered()
         ip = get_valid_pdp_ip(cid) if registered else ""
@@ -1190,24 +1721,29 @@ def network_monitor_worker(config):
             if lost_since is None:
                 lost_since = now
                 logger.error("Network monitor detected no LTE/IP registered={} ip={}".format(registered, ip))
-            lost_sec = int(utime.ticks_diff(now, lost_since) / 1000)
-            if stack_restart_sec and lost_sec >= stack_restart_sec and not stack_restarted:
-                logger.error("Network monitor restarting modem stack after {}s without network".format(lost_sec))
-                try:
-                    net.setModemFun(0, 0)
-                    utime.sleep(3)
-                    net.setModemFun(1, 0)
-                    apply_saved_net_mode(config)
-                    wait_for_network(int(net_cfg.get("RegistrationTimeoutSec", 120) or 120))
-                    apply_pdp_config(config)
-                    wait_for_ip(cid, int(net_cfg.get("PdpTimeoutSec", 60) or 60))
-                except Exception as e:
-                    logger.error("Network monitor stack restart error {}".format(e))
-                stack_restarted = True
-            if power_restart_sec and lost_sec >= power_restart_sec:
-                logger.error("Network monitor power restart after {}s without network".format(lost_sec))
-                utime.sleep(1)
-                Power.powerRestart()
+            if recovery_enabled:
+                lost_sec = int(utime.ticks_diff(now, lost_since) / 1000)
+                if stack_restart_sec and lost_sec >= stack_restart_sec and not stack_restarted:
+                    logger.error(
+                        "RESTART_REASON=network_stack lost_sec={}s".format(lost_sec)
+                    )
+                    try:
+                        net.setModemFun(0, 0)
+                        utime.sleep(3)
+                        net.setModemFun(1, 0)
+                        apply_saved_net_mode(config)
+                        wait_for_network(int(net_cfg.get("RegistrationTimeoutSec", 120) or 120))
+                        apply_pdp_config(config)
+                        wait_for_ip(cid, int(net_cfg.get("PdpTimeoutSec", 60) or 60))
+                    except Exception as e:
+                        logger.error("Network monitor stack restart error {}".format(e))
+                    stack_restarted = True
+                if power_restart_sec and lost_sec >= power_restart_sec:
+                    logger.error(
+                        "RESTART_REASON=network_power lost_sec={}s".format(lost_sec)
+                    )
+                    utime.sleep(1)
+                    Power.powerRestart()
         utime.sleep(interval)
 
 
@@ -1240,11 +1776,10 @@ def mqtt_connect(sock, client_id, keepalive, user="", password=""):
     payload = mqtt_encode_string(client_id)
     if user:
         flags |= 0x80
+        payload += mqtt_encode_string(user)
         if password:
             flags |= 0x40
-        if password:
             payload += mqtt_encode_string(password)
-        payload += mqtt_encode_string(user)
     variable = mqtt_encode_string("MQTT") + bytes([4, flags, keepalive >> 8, keepalive & 0xFF])
     sock.send(mqtt_packet(0x10, variable + payload))
     resp = sock.recv(4)
@@ -1267,14 +1802,15 @@ def mqtt_disconnect(sock):
         pass
 
 
-def mqtt_publish_once(mqtt_cfg):
+def mqtt_publish_with_payload(mqtt_cfg, payload_obj):
+    if not str(mqtt_cfg.get("Host", "")).strip():
+        return {"ok": False, "message": "Broker MQTT no configurado"}
     if not is_cellular_registered():
-        logger.error("MQTT skipped: cellular not registered")
-        return False
+        return {"ok": False, "message": "Modem sin registro en red celular"}
     cid = int(read_config().get("APN", {}).get("Cid", 1))
-    if not get_valid_pdp_ip(cid):
-        logger.error("MQTT skipped: PDP IP not valid")
-        return False
+    pdp_ip = get_valid_pdp_ip(cid)
+    if not pdp_ip:
+        return {"ok": False, "message": "IP de datos no disponible"}
 
     imei = safe_call(modem.getDevImei, "") or "unknown"
     host = mqtt_cfg.get("Host", "185.187.170.193")
@@ -1283,46 +1819,64 @@ def mqtt_publish_once(mqtt_cfg):
     topic_prefix = mqtt_cfg.get("TopicPrefix", "MetaSense/ModemEGmini")
     topic = "{}/{}".format(topic_prefix, imei)
     client_id = "{}_{}".format(mqtt_cfg.get("ClientPrefix", "EG800K"), imei)
-    payload = ujson.dumps(telemetry_payload())
+    payload = ujson.dumps(payload_obj)
 
-    sock = None
-    try:
-        addr = usocket.getaddrinfo(host, port)[0][-1]
-        sock = usocket.socket(usocket.AF_INET, usocket.SOCK_STREAM)
-        sock.settimeout(20)
-        sock.connect(addr)
-        if not mqtt_connect(sock, client_id, keepalive, mqtt_cfg.get("User", ""), mqtt_cfg.get("Pass", "")):
-            return False
-        mqtt_publish(sock, topic, payload)
-        mqtt_disconnect(sock)
-        logger.info("MQTT telemetry published topic={} bytes={}".format(topic, len(payload)))
-        return True
-    except Exception as e:
-        logger.error("MQTT publish error {}".format(e))
-        return False
-    finally:
-        try:
-            if sock:
-                sock.close()
-        except:
-            pass
+    with mqtt_lock:
+        last_error = "Error MQTT desconocido"
+        for attempt in range(2):
+            sock = None
+            try:
+                pdp_ip = get_valid_pdp_ip(cid)
+                if not pdp_ip:
+                    return {"ok": False, "message": "IP de datos no disponible"}
+                addr = resolve_host_addr(host, port)
+                sock = socket_tcp_client(pdp_ip)
+                sock.settimeout(20)
+                logger.info(
+                    "MQTT connect attempt={} local={} broker={}:{}".format(
+                        attempt + 1, pdp_ip, host, port
+                    )
+                )
+                sock.connect(addr)
+                if not mqtt_connect(
+                    sock, client_id, keepalive, mqtt_cfg.get("User", ""), mqtt_cfg.get("Pass", "")
+                ):
+                    return {"ok": False, "message": "Conexion MQTT rechazada por el broker"}
+                mqtt_publish(sock, topic, payload)
+                mqtt_disconnect(sock)
+                logger.info("MQTT published topic={} bytes={}".format(topic, len(payload)))
+                return {"ok": True, "topic": topic, "bytes": len(payload), "payload": payload_obj}
+            except Exception as e:
+                last_error = "Error MQTT: {}".format(e)
+                logger.error("MQTT publish error attempt={} {}".format(attempt + 1, e))
+                errno = e.args[0] if getattr(e, "args", None) else 0
+                if attempt == 0 and mqtt_connect_retriable_errno(errno):
+                    utime.sleep(1)
+                    continue
+                return {"ok": False, "message": last_error}
+            finally:
+                try:
+                    if sock:
+                        sock.close()
+                except:
+                    pass
+        return {"ok": False, "message": last_error}
+
+
+def mqtt_publish_once(mqtt_cfg):
+    return mqtt_publish_with_payload(mqtt_cfg, telemetry_payload()).get("ok", False)
 
 
 def mqtt_worker(config):
-    mqtt_cfg = config.get("MQTT", {})
-    if not mqtt_cfg.get("Enabled", False):
-        logger.info("MQTT telemetry disabled")
-        return
-    interval = int(mqtt_cfg.get("IntervalSec", 300) or 300)
-    if interval < 30:
-        interval = 30
-    logger.info(
-        "MQTT telemetry enabled broker={}:{} interval={}s".format(
-            mqtt_cfg.get("Host", ""), mqtt_cfg.get("Port", 1883), interval
-        )
-    )
     utime.sleep(10)
     while True:
+        mqtt_cfg = read_config().get("MQTT", {})
+        if not mqtt_cfg.get("Enabled", False):
+            utime.sleep(30)
+            continue
+        interval = int(mqtt_cfg.get("IntervalSec", 300) or 300)
+        if interval < 30:
+            interval = 30
         mqtt_publish_once(mqtt_cfg)
         gc.collect()
         utime.sleep(interval)
@@ -1356,7 +1910,7 @@ def main():
         port=WEB_PORT,
         templatePath="/usr/www/",
         staticPath="/usr/www/",
-        staticPrefix="",
+        staticPrefix="/__protected_static__/",
     )
     _thread.start_new_thread(srv.Start, ())
     _thread.start_new_thread(scheduled_restart_worker, (config,))

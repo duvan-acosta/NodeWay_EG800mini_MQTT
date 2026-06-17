@@ -1,4 +1,5 @@
 {
+  "CONFIG_VERSION": 4,
   "AUTH": {
     "User": "admin",
     "Pass": "admin"
@@ -12,7 +13,7 @@
     "Auth": 0
   },
   "NETMODE": {
-    "Mode": 5
+    "Mode": 12
   },
   "RS485": {
     "UARTn": 2,
@@ -49,7 +50,7 @@
     "Enabled": true,
     "Mode": "RNDIS",
     "OpenAfterPdp": true,
-    "RestartAfterModeChange": true
+    "RestartAfterModeChange": false
   },
   "MQTT": {
     "Enabled": true,

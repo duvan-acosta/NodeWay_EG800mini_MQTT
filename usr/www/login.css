@@ -1,0 +1,134 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --gdo-navy: #002d6a;
+  --gdo-blue: #00a1de;
+  --bg: #f0f4f8;
+  --bg-card: #ffffff;
+  --text: #1a2332;
+  --text2: #5a6a8a;
+  --border: #d0d8e5;
+  --radius: 10px;
+  --red: #dc3545;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  font-family: Bahnschrift, "Trebuchet MS", "Segoe UI", sans-serif;
+  background: linear-gradient(160deg, #e8eef5 0%, #f7fafc 45%, #eef4fb 100%);
+  color: var(--text);
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 45, 106, 0.08);
+  padding: 32px 28px;
+}
+
+.login-brand h1 {
+  color: var(--gdo-navy);
+  font-size: 1.8rem;
+  margin-bottom: 6px;
+}
+
+.login-brand p {
+  color: var(--text2);
+  margin-bottom: 24px;
+}
+
+.login-form .form-group {
+  margin-bottom: 16px;
+}
+
+.login-form label {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+
+.login-form input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 84px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--gdo-blue);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.password-toggle:hover {
+  color: var(--gdo-navy);
+}
+
+.login-form input:focus {
+  outline: none;
+  border-color: var(--gdo-blue);
+  box-shadow: 0 0 0 3px rgba(0, 161, 222, 0.15);
+}
+
+.login-error {
+  color: var(--red);
+  font-size: 0.92rem;
+  margin-bottom: 12px;
+}
+
+.btn {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 16px;
+  background: var(--gdo-navy);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #003f8f;
+}
+
+.btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}

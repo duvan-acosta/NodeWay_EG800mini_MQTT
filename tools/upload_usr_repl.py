@@ -7,7 +7,12 @@ import serial
 
 
 BAUD = 115200
-PORTS = ["COM7", "COM5"]
+PORTS = [
+    ("COM7", (921600, 115200)),
+    ("COM6", (115200, 921600)),
+    ("COM5", (115200, 921600)),
+    ("COM4", (115200,)),
+]
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOCAL_USR = os.path.join(ROOT, "usr")
 REMOTE_USR = "/usr"
@@ -19,38 +24,51 @@ def read_all(ser, delay=0.2):
 
 
 def find_repl():
-    for port in PORTS:
-        try:
-            ser = serial.Serial(port, BAUD, timeout=1)
-            ser.reset_input_buffer()
-            ser.write(b"\r\x03\x03")
-            out = read_all(ser, 1.0)
-            ser.write(b"\x02\r\n")
-            out += read_all(ser, 0.5)
-            if b">>>" in out or b"KeyboardInterrupt" in out or b"QuecPython" in out:
-                print("REPL found on {}".format(port))
-                return ser
-            ser.close()
-            print("{} opened but no REPL response: {!r}".format(port, out[:120]))
-        except Exception as exc:
-            print("{} not available: {}".format(port, exc))
+    for port, bauds in PORTS:
+        for baud in bauds:
+            try:
+                ser = serial.Serial(port, baud, timeout=1)
+                ser.reset_input_buffer()
+                for _ in range(4):
+                    ser.write(b"\r\x03")
+                    read_all(ser, 0.4)
+                ser.write(b"\x02\r\n")
+                out = read_all(ser, 1.5)
+                if b">>>" in out or b"KeyboardInterrupt" in out or b"QuecPython" in out:
+                    print("REPL found on {} @ {}".format(port, baud))
+                    return ser
+                ser.close()
+                print("{} @ {} no REPL: {!r}".format(port, baud, out[:120]))
+            except Exception as exc:
+                print("{} @ {} not available: {}".format(port, baud, exc))
     return None
 
 
 def raw_exec(ser, code, wait=0.6, deadline=8):
+    ser.reset_input_buffer()
     ser.write(b"\x01")
-    read_all(ser, 0.2)
+    read_all(ser, 0.15)
     ser.write(code.encode("utf-8") + b"\x04")
     end = time.time() + deadline
     out = b""
     while time.time() < end:
         out += ser.read_all()
-        if b"\x04>" in out or b"Traceback" in out:
+        if b"\x04>" in out:
+            break
+        if b"Traceback" in out and b"CLOSE_OK" not in out and b"OPEN_OK" not in out:
             break
         time.sleep(wait)
     ser.write(b"\x02")
-    read_all(ser, 0.2)
+    read_all(ser, 0.15)
     return out
+
+
+def prepare_repl(ser):
+    raw_exec(
+        ser,
+        "try:\n import log\n log.basicConfig(level=log.CRITICAL)\nexcept:\n pass\nprint('PREP_OK')",
+        deadline=5,
+    )
 
 
 def ensure_dir(ser, path):
@@ -90,11 +108,11 @@ def upload_file(ser, local_path, remote_path):
         if idx == len(chunks) or idx % 25 == 0:
             print("  {}/{}".format(idx, len(chunks)))
 
-    out = raw_exec(ser, "f.close()\nprint('CLOSE_OK')", deadline=8)
+    out = raw_exec(ser, "f.close()\nprint('CLOSE_OK')", deadline=12)
     if b"CLOSE_OK" not in out:
-        raise RuntimeError("close failed for {}: {!r}".format(remote_path, out[:300]))
+        raise RuntimeError("close failed for {}: {!r}".format(remote_path, out[-400:]))
 
-    out = raw_exec(ser, "import uos\nprint(uos.stat('{}')[6])".format(remote_path), deadline=8)
+    out = raw_exec(ser, "import uos\nprint(uos.stat('{}')[6])".format(remote_path), deadline=12)
     text = out.decode(errors="ignore")
     if str(len(data)) not in text:
         raise RuntimeError("verify failed for {} expected {} got {!r}".format(remote_path, len(data), text[:300]))
@@ -120,10 +138,17 @@ def main():
         print("No REPL port found")
         return 2
     try:
+        prepare_repl(ser)
+        only = [a for a in sys.argv[1:] if not a.startswith("-")]
         for kind, local, remote in iter_files():
             if kind == "dir":
                 ensure_dir(ser, remote)
             else:
+                if only:
+                    name = os.path.basename(local).replace("\\", "/")
+                    remote_name = remote.rsplit("/", 1)[-1]
+                    if name not in only and remote_name not in only and remote not in only:
+                        continue
                 upload_file(ser, local, remote)
         out = raw_exec(
             ser,
